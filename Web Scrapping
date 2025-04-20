@@ -1,0 +1,99 @@
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+import time
+from bs4 import BeautifulSoup, Comment
+
+# Function to get gold-related news articles
+def get_gold_news():
+    base_url = "https://www.moneycontrol.com/news/tags/gold.html/page-"
+    news_data = []
+    
+    for page in range(1, 31):  # Fetch all 30 pages
+        url = f"{base_url}{page}/"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        
+        response = requests.get(url, headers=headers)
+        if response.status_code != 200:
+            print(f"Failed to fetch page {page}, Status Code: {response.status_code}")
+            continue
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        articles = soup.find_all("li", class_="clearfix")
+
+        for article in articles:
+            try:
+                title_tag = article.find("h2")
+                if not title_tag:
+                    continue
+                
+                title = title_tag.text.strip()
+                link = title_tag.find("a")["href"]
+                
+                # Extracting date correctly
+                comment = article.find(string=lambda text: isinstance(text, Comment))
+                date_text= "Unknown Date"
+   
+                date = comment.replace("span","").replace("<>","").replace("</>","").replace(" ","")  
+                # Fetch the full article
+                article_text = get_article_content(link)
+                
+                # Rewrite the article in simpler words
+                rewritten_text = rewrite_article(article_text)
+                
+                news_data.append({
+                    "date": date,
+                    "title": title,
+                    "original_news": article_text,
+                    "rewritten_news": rewritten_text,
+                    "link": link
+                })
+                
+                time.sleep(1.5)  # Prevent getting blocked
+                
+            except Exception as e:
+                print(f"Error processing article: {e}")
+           
+    return news_data
+
+# Function to get the full article content
+def get_article_content(url):
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers)
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        paragraphs = soup.find_all("p")
+        full_text = " ".join([p.text for p in paragraphs if p.text.strip()])
+        
+        return full_text if full_text else "No content available"
+    
+    except Exception as e:
+        print(f"Error fetching article content: {e}")
+        return "No content available"
+
+# Function to rewrite the article in simpler words
+def rewrite_article(text):
+    simple_replacements = {
+        "fluctuated": "changed",
+        "investment": "spending money for future profit",
+        "market demand": "people wanting to buy",
+        "economic uncertainty": "not sure about the economy",
+        "volatile": "changing a lot",
+        "inflation": "prices going up",
+        "bullish": "prices going up",
+        "bearish": "prices going down"
+    }
+    
+    for key, value in simple_replacements.items():
+        text = text.replace(key, value)
+    
+    return text
+
+# Fetch and save data
+news_data = get_gold_news()
+df = pd.DataFrame(news_data)
+df.to_csv("gold_news_data.csv", index=False, encoding="utf-8")
+
+print("Gold news data saved successfully!")
