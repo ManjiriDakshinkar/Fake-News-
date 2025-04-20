@@ -1,0 +1,551 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import itertools
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import classification_report
+from sklearn.metrics import roc_curve, auc, roc_auc_score
+import re
+import string
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from nltk.stem import WordNetLemmatizer
+import unicodedata
+import spacy
+# Download necessary NLP resources
+nltk.download('punkt')
+nltk.download('stopwords')
+nltk.download('wordnet')
+
+# Load True News dataset
+data_true= pd.read_excel(r"True Gold News Train.xlsx")
+data_fake = pd.read_excel(r"Fake Gold News Train new.xlsx")
+
+data_fake.head()
+data_true.head()
+data_true.drop(['sr.no'], axis=1, inplace=True)
+data_true.head()
+
+# Add labels
+data_fake['label'] = 0
+data_true['label'] = 1
+
+# Combine datasets
+df = pd.concat([data_fake, data_true], axis=0)
+df = df.sample(frac=1).reset_index(drop=True) # Shuffle the dataset
+
+# Checking for missing values
+missing_values = df.isnull().sum()
+print("\nMissing Values:\n", missing_values)
+
+# Map numeric labels to text
+df['label'] = df['label'].map({0: 'Fake', 1: 'True'})
+# Plot
+ax = sns.countplot(x='label', hue='label', data=df, palette='coolwarm', legend=False)
+for p in ax.patches:
+ax.text(p.get_x() + p.get_width()/2, p.get_height() + 5, int(p.get_height()), ha='center')
+plt.title("Distribution of Fake vs. True News")
+plt.xlabel("News Type")
+plt.ylabel("Count")
+plt.show()
+
+Data Cleaning
+
+def wordpot(text):
+# Remove accents
+text = ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c))
+text = re.sub('\[.*?\]', '', text)
+text = re.sub("\\W", " ", text)
+text = re.sub('https?://\S+|www\.\S+', '', text)
+text = re.sub('<.*?>+', '', text)
+text = re.sub('[%s]' % re.escape(string.punctuation), '', text)
+text = re.sub('\n', '', text)
+text = re.sub('\w*\d\w*', '', text)
+return text
+df['CON'] = df['news'].apply(wordpot)
+def clean_text(text):
+return ''.join(char for char in text if char.isalpha() or char.isspace()).strip()
+# Function to remove numbers
+def remove_numbers(text):
+return re.sub(r'\d+', '', text)
+# Apply the function to remove numbers
+df['CN'] = df['news'].apply(remove_numbers)
+# Print the result
+print(df[['CN', 'CON']])
+
+# Load SpaCy model (English)
+nlp = spacy.load("en_core_web_sm")
+# Function to tokenize and lemmatize using SpaCy
+def lemmatize_text(text):
+doc = nlp(text)
+lemmatized_tokens = [token.lemma_ for token in doc if not token.is_stop and not token.is_punct]
+return " ".join(lemmatized_tokens)
+# Apply tokenization & lemmatization
+df['Clean_News'] = df['CN'].apply(lemmatize_text)
+# Print results
+print(df[['news', 'Clean_News']].head())
+
+Exploratory Data Analysis
+
+# Text Length Analysis
+# Create column for word count
+df['word_count'] = df['news'].apply(lambda x: len(x.split()))
+print("\nAverage Word Count:")
+print(df.groupby('label')['word_count'].mean())
+# Plot histograms
+plt.figure(figsize=(12, 5))
+# Word Count Distribution
+plt.subplot(1, 2, 2)
+sns.histplot(data=df, x='word_count', hue='label', bins=40, kde=True, palette='coolwarm')
+plt.title('Word Count Distribution')
+plt.xlabel('Word Count')
+plt.ylabel('Frequency')
+plt.tight_layout()
+plt.show()
+
+# Word Cloud
+
+# Word Cloud for Fake News
+from wordcloud import WordCloud
+fake_news = df[df['label'] == 'Fake']['news'].str.cat(sep=' ')
+wordcloud_fake = WordCloud(width=800, height=400, background_color='black').generate(fake_news)
+plt.figure(figsize=(10, 5))
+plt.imshow(wordcloud_fake, interpolation='bilinear')
+plt.axis("off")
+plt.title("Word Cloud - Fake News")
+plt.show()
+
+# Word Cloud for True News
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
+true_news = df[df['label'] == 'True']['news'].str.cat(sep=' ')
+wordcloud_true = WordCloud(width=600, height=300, background_color='white').generate(true_news)
+plt.figure(figsize=(10, 5))
+plt.imshow(wordcloud_true, interpolation='bilinear')
+plt.axis("off")
+plt.title("Word Cloud - True News")
+plt.show()
+
+# Fake News Spead Over Time
+
+df['date'] = pd.to_datetime(df['date'])
+
+# Convert 'date' column to datetime if it's not already
+df['date'] = pd.to_datetime(df['date'])
+# Set 'date' column as the index
+df.set_index('date', inplace=True)
+# Resample data
+fake_news_monthly = df[df['label'] == 'Fake']['label'].resample('ME').count()
+# Plot
+plt.figure(figsize=(12, 6))
+fake_news_monthly.plot(marker='o')
+# Annotate specific months
+highlight_months = ['2024-03-31', '2024-06-30', '2024-07-31', '2025-01-31']
+for date_str in highlight_months:
+date = pd.to_datetime(date_str)
+if date in fake_news_monthly.index:
+value = fake_news_monthly[date]
+plt.annotate(f'{value}',
+xy=(date, value),
+xytext=(date, value + 2),
+ha='center',
+fontsize=9,
+fontweight='bold',
+arrowprops=dict(arrowstyle='->', color='gray'))
+# Styling
+plt.title("Fake News Spread Over Time")
+plt.xlabel("Date")
+plt.ylabel("Count of Fake News")
+plt.xticks(rotation=45)
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+# Fake News Articles by Month (All Years)
+
+# Time-Based Analysis (Only for Fake News)
+# Convert 'date' column to datetime format
+data_fake['date'] = pd.to_datetime(data_fake['date'], errors='coerce')
+# Drop rows with invalid or missing dates
+data_fake = data_fake.dropna(subset=['date'])
+# Extract year, full month name, and numerical month for sorting
+data_fake['year'] = data_fake['date'].dt.year
+data_fake['month'] = data_fake['date'].dt.strftime('%B')
+data_fake['month_num'] = data_fake['date'].dt.month
+# Plot: Number of Fake News Articles by Month (Aggregated Across Years)
+monthly_counts = data_fake['month'].value_counts().reset_index()
+monthly_counts.columns = ['month', 'count']
+monthly_counts['month_num'] = pd.to_datetime(monthly_counts['month'], format='%B').dt.month
+monthly_counts = monthly_counts.sort_values('month_num')
+plt.figure(figsize=(12, 5))
+ax = sns.barplot(data=monthly_counts, x='month', y='count', color='skyblue', edgecolor='black')
+# Line plot (on top of the same axis)
+sns.lineplot(data=monthly_counts, x='month', y='count', color='crimson', marker='o', ax=ax)
+# Correct label positioning
+for p in ax.patches:
+height = p.get_height()
+ax.text(p.get_x() + p.get_width() / 2., height + 1, int(height), ha="center", fontsize=9)
+plt.title('Fake News Articles by Month (All Years)')
+plt.xlabel('Month')
+plt.ylabel('Number of Articles')
+plt.tight_layout()
+plt.show()
+
+# N-Grams
+
+from sklearn.feature_extraction.text import CountVectorizer
+import seaborn as sns
+import matplotlib.pyplot as plt
+import pandas as pd
+def plot_ngrams(text_series, n=2, top_k=20, title_prefix=""):
+# Convert Series to list if needed
+text_list = text_series.dropna().tolist()
+# Vectorize using n-grams
+vec = CountVectorizer(ngram_range=(n, n), stop_words='english').fit(text_list)
+bag = vec.transform(text_list)
+# Count frequency
+sum_words = bag.sum(axis=0)
+words_freq = [(word, sum_words[0, idx]) for word, idx in vec.vocabulary_.items()]
+words_freq = sorted(words_freq, key=lambda x: x[1], reverse=True)[:top_k]
+# Create DataFrame
+words_df = pd.DataFrame(words_freq, columns=['ngram', 'count'])
+# Plot
+plt.figure(figsize=(10, 6))
+sns.barplot(data=words_df, x='count', y='ngram', hue='ngram', palette='mako', dodge=False, legend=False)
+plt.title(f'{title_prefix} Top {n}-grams')
+plt.xlabel('Count')
+plt.ylabel(f'{n}-gram')
+plt.tight_layout()
+plt.show()
+
+# Overall bigrams
+plot_ngrams(df[df['label'] == 'Fake']['Clean_News'], n=2, title_prefix="Fake News")
+# Trigrams for fake news only
+plot_ngrams(df[df['label'] == 'Fake']['Clean_News'], n=3, title_prefix="Fake News")
+
+Model Building
+
+x = df['Clean_News']
+y = df['label']
+
+import itertools
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import classification_report
+
+x_train, x_test, y_train, y_test = train_test_split(x,y, test_size= 0.20)
+
+# Tfid Vectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer
+vectorization = TfidfVectorizer()
+xv_train = vectorization.fit_transform(x_train)
+xv_test = vectorization.transform(x_test)
+
+# Logistic Regression
+
+from sklearn.linear_model import LogisticRegression
+LR = LogisticRegression()
+LR.fit(xv_train, y_train)
+pred_lr = LR.predict(xv_test)
+LR.score(xv_test, y_test)
+print(classification_report(y_test, pred_lr))
+# ROC Curve
+# Convert y_test to numeric
+y_test_numeric = [0 if label == 'Fake' else 1 for label in y_test]
+# Get predicted probabilities
+y_prob_lr = LR.predict_proba(xv_test)[:, 1]
+# Compute ROC curve and AUC
+fpr_lr, tpr_lr, _ = roc_curve(y_test_numeric, y_prob_lr)
+auc_lr = auc(fpr_lr, tpr_lr)
+# Plotting
+plt.figure(figsize=(8, 5))
+plt.plot(fpr_lr, tpr_lr, label=f'Logistic Regression (AUC = {auc_lr:.2f})')
+plt.plot([0, 1], [0, 1], 'k--')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve - Fake News Detection')
+plt.legend(loc='lower right')
+plt.grid(True)
+plt.show()
+
+# Decision Tree
+
+from sklearn.tree import DecisionTreeClassifier
+DT = DecisionTreeClassifier()
+DT.fit(xv_train, y_train)
+pred_dt = DT.predict(xv_test)
+DT.score(xv_test, y_test)
+print(classification_report(y_test, pred_dt))
+# ROC Curve
+# Convert y_test to numeric
+y_test_numeric = [0 if label == 'Fake' else 1 for label in y_test]
+# Get predicted probabilities
+y_prob_dt = DT.predict_proba(xv_test)[:, 1]
+# Compute ROC curve and AUC
+fpr_dt, tpr_dt, _ = roc_curve(y_test_numeric, y_prob_dt)
+auc_dt = auc(fpr_dt, tpr_dt)
+# Plotting
+plt.figure(figsize=(8, 5))
+plt.plot(fpr_dt, tpr_dt, label=f'DecisionTree (AUC = {auc_dt:.2f})')
+plt.plot([0, 1], [0, 1], 'k--')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve - Fake News Detection')
+plt.legend(loc='lower right')
+plt.grid(True)
+plt.show()
+
+# Gradient Boost Classifier
+
+from sklearn.ensemble import GradientBoostingClassifier
+GB = GradientBoostingClassifier(random_state = 0)
+GB.fit(xv_train, y_train)
+predict_gb = GB.predict(xv_test)
+GB.score(xv_test, y_test)
+print(classification_report(y_test, predict_gb))
+# ROC Curve
+# Convert y_test to numeric
+y_test_numeric = [0 if label == 'Fake' else 1 for label in y_test]
+# Get predicted probabilities
+y_prob_gb = GB.predict_proba(xv_test)[:, 1]
+# Compute ROC curve and AUC
+fpr_gb, tpr_gb, _ = roc_curve(y_test_numeric, y_prob_gb)
+auc_gb = auc(fpr_gb, tpr_gb)
+# Plotting
+plt.figure(figsize=(8, 5))
+plt.plot(fpr_gb, tpr_gb, label=f'Gradient Boost (AUC = {auc_gb:.2f})')
+plt.plot([0, 1], [0, 1], 'k--')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve - Fake News Detection')
+plt.legend(loc='lower right')
+plt.grid(True)
+plt.show()
+
+# Random Forest
+
+from sklearn.ensemble import RandomForestClassifier
+RF = RandomForestClassifier(random_state = 0)
+RF.fit(xv_train, y_train)
+pred_rf = RF.predict(xv_test)
+RF.score(xv_test, y_test)
+print(classification_report(y_test, pred_rf))
+# ROC Curve
+# Convert y_test to numeric
+y_test_numeric = [0 if label == 'Fake' else 1 for label in y_test]
+# Get predicted probabilities
+y_prob_rf = RF.predict_proba(xv_test)[:, 1]
+# Compute ROC curve and AUC
+fpr_rf, tpr_rf, _ = roc_curve(y_test_numeric, y_prob_rf)
+auc_rf = auc(fpr_rf, tpr_rf)
+# Plotting
+plt.figure(figsize=(8, 5))
+plt.plot(fpr_rf, tpr_rf, label=f'Random Forest (AUC = {auc_rf:.2f})')
+plt.plot([0, 1], [0, 1], 'k--')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve - Fake News Detection')
+plt.legend(loc='lower right')
+plt.grid(True)
+plt.show()
+
+# Naive Bayes
+
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.metrics import classification_report, accuracy_score
+NB = MultinomialNB()
+NB.fit(xv_train, y_train)
+pred_nb = NB.predict(xv_test)
+accuracy = accuracy_score(y_test, pred_nb)
+print(f'Naïve Bayes Accuracy: {accuracy:.4f}')
+print(classification_report(y_test, pred_nb))
+# ROC Curve
+# Convert y_test to numeric
+y_test_numeric = [0 if label == 'Fake' else 1 for label in y_test]
+# Get predicted probabilities
+y_prob_nb = NB.predict_proba(xv_test)[:, 1]
+# Compute ROC curve and AUC
+fpr_nb, tpr_nb, _ = roc_curve(y_test_numeric, y_prob_nb)
+auc_nb = auc(fpr_nb, tpr_nb)
+# Plotting
+plt.figure(figsize=(8, 5))
+plt.plot(fpr_nb, tpr_nb, label=f'Naïve Bayes (AUC = {auc_nb:.2f})')
+plt.plot([0, 1], [0, 1], 'k--')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve - Fake News Detection')
+plt.legend(loc='lower right')
+plt.grid(True)
+plt.show()
+
+# Checking
+
+import pandas as pd
+def output_label(n):
+"""Function to map numerical predictions to labels."""
+return "Fake News" if n == 0 else "Not A Fake News"
+def manual_testing(news):
+"""Function to predict whether the news is fake or not."""
+testing_news = {"text": [news]}
+new_def_test = pd.DataFrame(testing_news) # Fixed DataFrame typo
+new_def_test["text"] = new_def_test["text"].apply(wordpot) # Preprocessing function
+new_x_test = new_def_test["text"]
+new_xv_test = vectorization.transform(new_x_test) # Fixed method typo
+# Predictions from different models
+pred_LR = LR.predict(new_xv_test)
+pred_DT = DT.predict(new_xv_test)
+pred_GB = GB.predict(new_xv_test)
+pred_RF = RF.predict(new_xv_test)
+pred_NB = NB.predict(new_xv_test) # Added Naïve Bayes prediction
+return "\nLR Prediction: {} \nDT Prediction: {} \nGBC Prediction: {} \nRFC Prediction: {} \nNB Prediction: {}".format(
+output_label(pred_LR[0]),
+output_label(pred_DT[0]),
+output_label(pred_GB[0]),
+output_label(pred_RF[0]),
+output_label(pred_NB[0]) # Added Naïve Bayes result
+)
+# Example Usage
+news_input = input("Enter the news article: ")
+print(manual_testing(news_input))
+
+# Cross-Validation
+
+# Cross- Validation
+from sklearn.model_selection import cross_val_score
+import numpy as np
+models = {
+"Logistic Regression": LR,
+"Decision Tree": DT,
+"Gradient Boosting": GB,
+"Random Forest": RF,
+"Naïve Bayes": NB
+}
+for model_name, model in models.items():
+scores = cross_val_score(model, xv_train, y_train, cv=5, scoring='accuracy') # 5-Fold CV
+print(f"{model_name}: Mean Accuracy = {np.mean(scores):.4f}, Std Dev = {np.std(scores):.4f}")
+
+Test Data
+
+import pandas as pd
+test_df= pd.read_excel(r"Test True False News.xlsx")
+# Shuffle the test data
+test_df = test_df.sample(frac=1).reset_index(drop=True)
+test_df.head()
+
+# Data Cleaning
+
+def wordpot(text):
+import re, string, unicodedata
+text = ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c))
+text = re.sub(r'\[.*?\]', '', text)
+text = re.sub(r'\\W', ' ', text)
+text = re.sub(r'https?://\S+|www\.\S+', '', text)
+text = re.sub(r'<.*?>+', '', text)
+text = re.sub('[%s]' % re.escape(string.punctuation), '', text)
+text = re.sub(r'\n', '', text)
+text = re.sub(r'\w*\d\w*', '', text)
+return text.lower()
+def remove_numbers(text):
+import re
+return re.sub(r'\d+', '', text)
+# Apply cleaning
+test_df['news'] = test_df['news'].apply(wordpot)
+test_df['news'] = test_df['news'].apply(remove_numbers)
+from spacy.lang.en import English
+import spacy
+nlp = spacy.load("en_core_web_sm")
+def lemmatize_text(text):
+doc = nlp(text)
+return " ".join([token.lemma_ for token in doc if not token.is_stop and not token.is_punct])
+test_df['Clean_News'] = test_df['news'].apply(lemmatize_text)
+# Print results
+print(test_df[['news', 'Clean_News']].head())
+
+# Transforming text using the same vectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer
+x_test = test_df['Clean_News']
+xv_test = vectorization.transform(x_test)
+
+# Predicting using your trained models
+y_test = test_df['label']
+pred_lr = LR.predict(xv_test)
+pred_gb = GB.predict(xv_test)
+pred_nb = NB.predict(xv_test)
+
+# Convert predictions from 'Fake'/'True' → 0/1
+def label_to_num(label):
+return 0 if label == "Fake" else 1
+pred_lr_num = [label_to_num(i) for i in pred_lr]
+pred_gb_num = [label_to_num(i) for i in pred_gb]
+pred_nb_num = [label_to_num(i) for i in pred_nb]
+
+# Evaulating
+print("Logistic Regression Accuracy:", accuracy_score(y_test, pred_lr_num))
+print(classification_report(y_test, pred_lr_num))
+print("Gradient Boost Accuracy:", accuracy_score(y_test, pred_gb_num))
+print(classification_report(y_test, pred_gb_num))
+print("Naive Bayes Accuracy:", accuracy_score(y_test, pred_nb_num))
+print(classification_report(y_test, pred_nb_num))
+
+# Cross Validation
+from sklearn.model_selection import cross_val_score
+import numpy as np
+# Store models in a dictionary
+models = {
+"Logistic Regression": LR,
+"Gradient Boost": RF,
+"Naive Bayes": NB
+}
+print("Cross-Validation Results (5-Fold):\n")
+for name, model in models.items():
+scores = cross_val_score(model, xv_train, y_train, cv=5, scoring='accuracy')
+print(f"{name}:")
+print(f" Mean Accuracy = {np.mean(scores):.4f}")
+print(f" Standard Deviation = {np.std(scores):.4f}\n")
+
+# Comparision Bar Chart
+
+from sklearn.metrics import accuracy_score
+import matplotlib.pyplot as plt
+import pandas as pd
+# Define label converter
+def label_to_num(label):
+return 0 if label == "Fake" else 1
+# Get predictions from all models
+pred_nb = NB.predict(xv_test)
+pred_lr = LR.predict(xv_test)
+pred_rf = RF.predict(xv_test)
+pred_gb = GB.predict(xv_test)
+pred_dt = DT.predict(xv_test)
+# Convert predictions from 'Fake'/'True' to 0/1
+pred_nb_num = [label_to_num(i) for i in pred_nb]
+pred_lr_num = [label_to_num(i) for i in pred_lr]
+pred_rf_num = [label_to_num(i) for i in pred_rf]
+pred_gb_num = [label_to_num(i) for i in pred_gb]
+pred_dt_num = [label_to_num(i) for i in pred_dt]
+# Calculate accuracy
+accuracies = {
+'Naïve Bayes': accuracy_score(y_test, pred_nb_num),
+'Logistic Regression': accuracy_score(y_test, pred_lr_num),
+'Random Forest': accuracy_score(y_test, pred_rf_num),
+'Gradient Boost': accuracy_score(y_test, pred_gb_num),
+'Decision Tree': accuracy_score(y_test, pred_dt_num)
+}
+# Create DataFrame for display
+accuracy_df = pd.DataFrame.from_dict(accuracies, orient='index', columns=['Accuracy'])
+accuracy_df = accuracy_df.sort_values(by='Accuracy', ascending=False)
+display(accuracy_df)
+# Plot horizontal bar chart
+plt.figure(figsize=(10, 6))
+plt.barh(accuracy_df.index, accuracy_df['Accuracy'], color='skyblue')
+plt.xlabel("Accuracy")
+plt.title("Model Accuracy Comparison - Fake News Detection")
+plt.xlim(0.80, 1.0)
+for i, v in enumerate(accuracy_df['Accuracy']):
+plt.text(v + 0.001, i, f"{v:.4f}", va='center')
+plt.grid(True, axis='x', linestyle='--', alpha=0.7)
+plt.tight_layout()
+plt.show()
