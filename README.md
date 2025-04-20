@@ -40,11 +40,12 @@ Test evaluation on unseen news data
 
 **Best Performing Models
 **
-Model	Accuracy (Test Data)
+**Model	Accuracy (Test Data)
 Random Forest	98.88%
 Naïve Bayes	99.2%
-Logistic Regression	98.7%
-📌 Future Work
+Logistic Regression	98.7%**
+
+Future Work
 Include regional (non-English) news for broader coverage
 
 Add deep learning models (LSTM, BERT)
